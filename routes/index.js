@@ -1,110 +1,77 @@
 const express = require("express");
+const FlexSearch = require("flexsearch");
+const wsData = require("../daos/alan_data");
+
+
+const preset = "score"; 
+const searchIndex = new FlexSearch(preset);
 const router = express.Router();
 
-const FlexSearch = require("flexsearch");
-const preset = "score"; //more presets => https://www.npmjs.com/package/flexsearch#presets
-const searchIndex = new FlexSearch(preset);
 
-const wsData = require("../daos/my_data");
+function buildIndex() {
+  const data = wsData.data;
+  console.info("Building index starts");
+  for (let i = 0; i < 100; i++) {
+    const content = data[i].title + " " + data[i].content;
+    const key = i + 1;
+    searchIndex.add(key, content);
+    // console.info(key + " ===== " + content);  
+  }
+  console.info("Building index ends");
+}
 
-/**
- * Examples to execute:
- * http://localhost:3000/search?phrase=Cryptocurrency
- * http://localhost:3000/search?phrase=Cloud
- * http://localhost:3000/search?phrase=File
- * http://localhost:3000/search?phrase=Storage
- * http://localhost:3000/search?phrase=Open%20Threat
- */
+buildIndex();
 
-buildIndex(); //we call this method here but can be also called from an endpoint
-
-/**
- * Default endpoint. Just exposes some URLs samples
- */
-router.get("/", function(req, res, next) {
-  const results = [
-    {
-      request: "http://localhost:3000/search?phrase=Cryptocurrency"
-    },
-    {
-      request: "http://localhost:3000/search?phrase=Cloud"
-    },
-    {
-      request: "http://localhost:3000/search?phrase=File"
-    },
-    {
-      request: "http://localhost:3000/search?phrase=Storage"
-    },
-    {
-      request: "http://localhost:3000/search?phrase=Open%20Threat"
-    }
-  ];
-  res.json(results);
-});
-
-/**
- * Exposes and service to search in our index
- */
-router.get("/search", async (req, res, next) => {
+// search API to respond back to client query
+router.get("/search", async (request, response, next) => {
   try {
     if (searchIndex.length === 0) {
       await buildIndex();
     }
-
-    const phrase = req.query.phrase;
+    const phrase = request.query.phrase;
     if (!phrase) {
       throw Error("phrase query parameter empty");
     }
-    console.info("Searching by: " + phrase);
-    //search using flexsearch. It will return a list of IDs we used as keys during indexing
-    const resultIds = await searchIndex.search({
-      query: phrase,
-      suggest: true //When suggestion is enabled all results will be filled up (until limit, default 1000) with similar matches ordered by relevance.
-    });
+  
+    const results = findDocument(phrase);
+    let htmlResult = "<div style='display: inline;'>";
+    for (let i =0; i<results.length; i++) {
+      htmlResult = htmlResult + "<div style='box-shadow: 1px 1px #dadada;border: 1px solid #dadada;min-height: 250px;width: 30%;float: left;padding: 5px;margin: 15px;'><div style='line-height: 2rem;'><strong>" + results[i].title + "</strong></div>";
+      htmlResult = htmlResult + "<div class='content'>" + results[i].content + "</div></div>";
+    }
+    htmlResult = htmlResult + "</div>";
+    response.writeHead(200,"{Content-Type:text/html}"); 
+    response.end(htmlResult);
 
-    console.info("results: " + resultIds.length);
-    const results = getDataByIds(resultIds);
-    res.json(results);
   } catch (e) {
     next(e);
   }
 });
 
-/**
- *
- * @param idsList
- * @returns an array of elements from our main collection (our indexed data) wsData
- */
+// This function to find document 
+function findDocument(str) {
+  console.info("Searching by: " + str);
+  const resultIds = searchIndex.search({
+    query: str,
+    suggest: true,
+    limit:20
+  });
+  console.info("results: " + resultIds.length);
+  console.info(resultIds);
+  const results = getDataByIds(resultIds);
+  return results;
+}
+
+// once we have ids in return we have to get data.
 function getDataByIds(idsList) {
   const result = [];
   const data = wsData.data;
   for (let i = 0; i < data.length; i++) {
-    if (idsList.includes(data[i].id)) {
+    if (idsList.includes(i + 1)) {
       result.push(data[i]);
     }
   }
   return result;
-}
-
-/**
- * Have in mind we are working with an in-memory search so be careful with the amount of data
- * you load to the index. This method shouldn't take more than a couple of seconds running.
- */
-function buildIndex() {
-  console.time("buildIndexTook");
-  console.info("building index...");
-
-  const data = wsData.data; //we could get our data from DB, remote web service, etc.
-  for (let i = 0; i < data.length; i++) {
-    //we might concatenate the fields we want for our content
-    const content =
-      data[i].API + " " + data[i].Description + " " + data[i].Category;
-    const key = parseInt(data[i].id);
-    searchIndex.add(key, content);
-  }
-  console.info("index built, length: " + searchIndex.length);
-  console.info("Open a browser at http://localhost:3000/");
-  console.timelineEnd("buildIndexTook");
 }
 
 module.exports = router;
